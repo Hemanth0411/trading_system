@@ -1,0 +1,21 @@
+# Virtual Environment
+venv/
+*/venv/
+env/
+*/env/
+.env
+*.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django SQLite database (if you ever used it)
+*.sqlite3
+db.sqlite3
+
+# IDE / OS specific
+.vscode/
+.idea/
+*.DS_Store
