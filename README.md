@@ -32,6 +32,7 @@ This project is a basic trading system built to fulfill an internship assignment
     *   Endpoint to fetch trades (`GET /api/trades/`) with optional filtering by `ticker` and `date_range` (e.g., `?ticker=AAPL&start_date=YYYY-MM-DDTHH:MM:SSZ&end_date=YYYY-MM-DDTHH:MM:SSZ`).
     *   Data storage in PostgreSQL.
     *   Input validation for trade details (e.g., non-negative price/quantity, valid ticker format).
+    *   **Bonus:** Integrated Celery with Redis for asynchronous background task processing (e.g., sending a notification) when a new trade is created.
 *   **Task 2: Real-Time Data Processing**
     *   A Python script (`mock_server.py`) that simulates a WebSocket server sending mock stock price updates.
     *   A Python script (`websocket_client.py`) that connects to the mock server, receives price updates, and triggers a console notification if a stock's price increases by more than 2% within a minute.
@@ -46,8 +47,11 @@ This project is a basic trading system built to fulfill an internship assignment
 
 *   **Backend:** Python, Django, Django REST Framework
 *   **Database:** PostgreSQL
+*   **Asynchronous Task Queue:** Celery
+*   **Message Broker/Cache:** Redis
 *   **Real-Time Simulation:** Python `websockets` library
 *   **Cloud:** AWS S3, AWS Lambda, `boto3` (AWS SDK for Python)
+*   **Concurrency (for Celery on Windows):** eventlet
 *   **Version Control:** Git (implied)
 
 ## Setup Instructions
@@ -57,7 +61,8 @@ This project is a basic trading system built to fulfill an internship assignment
 *   Python (version 3.8+ recommended)
 *   `pip` (Python package installer)
 *   PostgreSQL server installed and running.
-*   AWS Account with CLI access configured (for Lambda deployment/testing if not using console exclusively, and for S3 access if running parts locally that interact with AWS).
+*   **Redis server installed and running.**
+*   AWS Account with CLI access configured ...
 *   Git (optional, for cloning if you host it on GitHub).
 
 ### 1. REST API (Django)
@@ -84,10 +89,17 @@ This project is a basic trading system built to fulfill an internship assignment
     *   Create a PostgreSQL database (e.g., `trading_system_db`).
     *   Create a database user (e.g., `trading_user` with password `trading_user`).
     *   Grant appropriate permissions to the user on the database (as detailed in our previous steps for `GRANT USAGE, CREATE ON SCHEMA public` and `GRANT ALL PRIVILEGES ON DATABASE`).
-5.  **Configure Django Settings:**
+5.  **Set up Redis Server:**
+    *   Install Redis (refer to official Redis documentation for your OS).
+        *   **macOS (Homebrew):** `brew install redis && brew services start redis`
+        *   **Linux (Ubuntu):** `sudo apt update && sudo apt install redis-server && sudo systemctl start redis-server`
+        *   **Windows:** Recommended to run Redis via WSL (Windows Subsystem for Linux) or Docker.
+            *   Inside WSL (e.g., Ubuntu): `sudo apt update && sudo apt install redis-server && sudo service redis-server start`
+    *   Ensure Redis server is running (typically on `localhost:6379`). You can test with `redis-cli ping` (should return `PONG`).
+6.  **Configure Django Settings:**
     *   Open `trading_system/settings.py`.
     *   Update the `DATABASES` setting with your PostgreSQL connection details (name, user, password, host, port).
-6.  **Apply Database Migrations:**
+7.  **Apply Database Migrations:**
     ```bash
     python manage.py makemigrations trades_api
     python manage.py migrate
@@ -127,6 +139,11 @@ This project is a basic trading system built to fulfill an internship assignment
 
 ## Running the Application
 
+For the full application experience (including background task processing for trade notifications), you'll need to run the Django development server, the Redis server, and the Celery worker.
+
+1.  **Ensure Redis Server is Running.** (As per setup instructions).
+2.  **Ensure PostgreSQL Server is Running.**
+
 ### Running the REST API
 
 1.  Navigate to the Django project root directory (where `manage.py` is).
@@ -136,6 +153,20 @@ This project is a basic trading system built to fulfill an internship assignment
     python manage.py runserver
     ```
     The API will typically be available at `http://127.0.0.1:8000/api/`.
+
+### Running the Celery Worker
+
+1.  Open a **new terminal window/tab**.
+2.  Navigate to the Django project root directory.
+3.  Activate your virtual environment.
+4.  Start the Celery worker:
+    ```bash
+    # On Linux/macOS:
+    celery -A trading_system worker -l info
+    # On Windows (recommended):
+    celery -A trading_system worker -l info -P eventlet
+    ```
+    The worker will connect to Redis and wait for tasks.
 
 ### Running the WebSocket Mock Server
 
@@ -196,13 +227,13 @@ This project is a basic trading system built to fulfill an internship assignment
 *   **WebSocket Data:** The WebSocket mock server sends a list of all mock ticker updates in each message.
 *   **Error Handling:** Basic error handling is implemented. Production systems would require more comprehensive logging and error management.
 *   **Database for WebSocket Client:** The bonus task to store 5-minute average prices from the WebSocket client into the Task 1 database was not implemented in the core tasks.
+*   **Redis server** is accessible on localhost:6379 for **Celery**.
 
 ## Future Enhancements (Optional)
 
-*   Implement the bonus tasks (Celery/Redis for API, average price storage for WebSocket, API Gateway for Lambda).
+*   Implement the bonus tasks (Average price storage for WebSocket, API Gateway for Lambda).
 *   Implement the optional Algorithmic Trading Simulation (Task 4).
 *   More robust error handling and logging throughout the application.
 *   User authentication and authorization for the API.
 *   Deployment of the Django API to a web server (e.g., Gunicorn + Nginx, or a PaaS like Heroku/AWS Elastic Beanstalk).
 *   Automated triggers for the Lambda function (e.g., S3 put event).
-*   Unit and integration tests for all components.

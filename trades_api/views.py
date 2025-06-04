@@ -1,7 +1,8 @@
-from rest_framework import generics
+from rest_framework import generics, status
 from .models import Trade
 from .serializers import TradeSerializer
 from django.utils.dateparse import parse_datetime # For converting date strings to datetime objects
+from .tasks import send_trade_notification_task
 # from datetime import timedelta # Could be used for more precise end_date handling
 
 # This view handles both listing trades (GET) and creating new trades (POST)
@@ -10,42 +11,41 @@ class TradeListCreateView(generics.ListCreateAPIView):
 
     # This method controls what data is returned for GET requests
     def get_queryset(self):
-        """
-        Optionally restricts the returned trades by filtering against
-        a `ticker`, `start_date` and `end_date` query parameter in the URL.
-        Example: /api/trades/?ticker=AAPL&start_date=2024-01-01&end_date=2024-01-31
-        """
-        queryset = Trade.objects.all().order_by('-timestamp') # Start with all trades, newest first
-
-        # Get filter parameters from the URL (e.g., ?ticker=AAPL)
+        
+        queryset = Trade.objects.all().order_by('-timestamp')
         ticker = self.request.query_params.get('ticker')
         start_date_str = self.request.query_params.get('start_date')
         end_date_str = self.request.query_params.get('end_date')
-
         if ticker:
-            # Filter by ticker, case-insensitive (e.g., "aapl" will match "AAPL")
             queryset = queryset.filter(ticker__iexact=ticker)
-
         if start_date_str:
-            start_date = parse_datetime(start_date_str) # Convert string to datetime
-            if start_date: # If conversion was successful
-                # __gte means "greater than or equal to"
+            start_date = parse_datetime(start_date_str)
+            if start_date:
                 queryset = queryset.filter(timestamp__gte=start_date)
-
         if end_date_str:
-            end_date = parse_datetime(end_date_str) # Convert string to datetime
-            if end_date: # If conversion was successful
-                # __lte means "less than or equal to"
-                # Note: if end_date_str is just a date like "2024-01-01",
-                # parse_datetime makes it "2024-01-01T00:00:00".
-                # This means it only includes trades right at midnight on that day.
-                # For including the whole day, end_date might need to be adjusted
-                # to the end of the day (e.g., by adding timedelta(days=1) - timedelta(microseconds=1)).
-                # For this assignment, the current behavior is acceptable.
+            end_date = parse_datetime(end_date_str)
+            if end_date:
                 queryset = queryset.filter(timestamp__lte=end_date)
-
         return queryset
 
-    # DRF's ListCreateAPIView automatically handles POST requests
-    # using the serializer_class to create new Trade objects.
-    # No need to write custom post() method for basic creation.
+    def perform_create(self, serializer):
+        trade_instance = serializer.save() 
+
+        # Prepare details for the task (serializer.data is a good source after save)
+        # It's generally better to pass simple data types (like IDs or dicts) to Celery tasks
+        # rather than full model instances, as model instances might not serialize well
+        # or might carry too much state.
+        trade_details_for_task = {
+            'id': trade_instance.id,
+            'ticker': trade_instance.ticker,
+            'price': str(trade_instance.price), # Convert Decimal to string
+            'quantity': trade_instance.quantity,
+            'side': trade_instance.side,
+            'timestamp': trade_instance.timestamp.isoformat() # Convert datetime to string
+        }
+        
+        # Call the Celery task asynchronously
+        # .delay() is a shortcut for .apply_async()
+        send_trade_notification_task.delay(trade_details_for_task)
+        
+        print(f"API View: New trade {trade_instance.id} created. Notification task queued.")
